@@ -9,8 +9,8 @@ import {
 
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
-/** Canvas panorama with bounded drag, spring feedback, inertia, and a minimap. */
-const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToStops, onLoadError }, ref) {
+/** Canvas panorama with bounded or continuous wraparound drag, pins, and a minimap. */
+const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToStops, wrap = false, onReady, onLoadError }, ref) {
   const viewRef = useRef(null);
   const mapRef = useRef(null);
   const imageRef = useRef(null);
@@ -21,11 +21,13 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   const frameRef = useRef(0);
   const stopsRef = useRef(stops);
   const snapRef = useRef(snapToStops);
+  const wrapRef = useRef(wrap);
   const [ready, setReady] = useState(false);
   const [canPan, setCanPan] = useState(false);
   const canPanRef = useRef(false);
   stopsRef.current = stops;
   snapRef.current = snapToStops;
+  wrapRef.current = wrap;
 
   const metrics = useCallback(() => {
     const image = imageRef.current;
@@ -33,8 +35,20 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     if (!image || !canvas) return { scale: 1, viewWidth: 0, maxOffset: 0 };
     const scale = canvas.clientHeight / image.height;
     const viewWidth = canvas.clientWidth / scale;
-    return { scale, viewWidth, maxOffset: Math.max(0, image.width - viewWidth) };
+    const maxOffset = wrapRef.current && image.width > viewWidth
+      ? image.width
+      : Math.max(0, image.width - viewWidth);
+    return { scale, viewWidth, maxOffset };
   }, []);
+
+  const normalizeOffset = useCallback((value) => {
+    const image = imageRef.current;
+    const { maxOffset } = metrics();
+    if (wrapRef.current && image && maxOffset === image.width) {
+      return ((value % image.width) + image.width) % image.width;
+    }
+    return clamp(value, 0, maxOffset);
+  }, [metrics]);
 
   const draw = useCallback(() => {
     const image = imageRef.current;
@@ -50,6 +64,8 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
       view.height = viewHeightPx;
     }
     const { viewWidth, maxOffset } = metrics();
+    const circular = wrapRef.current && maxOffset === image.width;
+    const offset = circular ? normalizeOffset(offsetRef.current) : offsetRef.current;
     const hasHorizontalOverflow = maxOffset > 1;
     if (canPanRef.current !== hasHorizontalOverflow) {
       canPanRef.current = hasHorizontalOverflow;
@@ -61,10 +77,17 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     ctx.fillRect(0, 0, view.width, view.height);
     const imageWidth = image.width * imageScale;
     const centeredOffset = maxOffset === 0 ? (view.width - imageWidth) / 2 : 0;
-    ctx.drawImage(image, centeredOffset - offsetRef.current * imageScale + stretchRef.current * dpr, 0, imageWidth, view.height);
+    if (circular) {
+      for (let x = -(offset * imageScale); x < view.width; x += imageWidth) {
+        ctx.drawImage(image, x + stretchRef.current * dpr, 0, imageWidth, view.height);
+      }
+    } else {
+      ctx.drawImage(image, centeredOffset - offset * imageScale + stretchRef.current * dpr, 0, imageWidth, view.height);
+    }
 
     for (const stop of stopsRef.current) {
-      const x = centeredOffset + (stop.center - offsetRef.current) * imageScale + stretchRef.current * dpr;
+      const distance = circular ? ((stop.center - offset + image.width) % image.width) : stop.center - offset;
+      const x = centeredOffset + distance * imageScale + stretchRef.current * dpr;
       if (x < -20 * dpr || x > view.width + 20 * dpr) continue;
       ctx.beginPath();
       ctx.moveTo(x, 48 * dpr);
@@ -104,19 +127,25 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     mapCtx.drawImage(image, imageMapX, imageMapY, imageMapWidth, imageMapHeight);
     mapCtx.fillStyle = "#10151055";
     mapCtx.fillRect(imageMapX, imageMapY, imageMapWidth, imageMapHeight);
-    const boxX = imageMapX + (offsetRef.current / image.width) * imageMapWidth;
+    const boxX = imageMapX + (offset / image.width) * imageMapWidth;
     const boxWidth = Math.min(imageMapWidth, (viewWidth / image.width) * imageMapWidth);
     mapCtx.fillStyle = "#d6f27638";
-    mapCtx.fillRect(boxX, imageMapY, boxWidth, imageMapHeight);
     mapCtx.strokeStyle = "#d6f276";
     mapCtx.lineWidth = 2 * mapDpr;
-    mapCtx.strokeRect(boxX, imageMapY + 1, boxWidth, Math.max(1, imageMapHeight - 2));
+    const firstBoxWidth = Math.min(boxWidth, imageMapX + imageMapWidth - boxX);
+    mapCtx.fillRect(boxX, imageMapY, firstBoxWidth, imageMapHeight);
+    mapCtx.strokeRect(boxX, imageMapY + 1, firstBoxWidth, Math.max(1, imageMapHeight - 2));
+    if (circular && firstBoxWidth < boxWidth) {
+      const remaining = boxWidth - firstBoxWidth;
+      mapCtx.fillRect(imageMapX, imageMapY, remaining, imageMapHeight);
+      mapCtx.strokeRect(imageMapX, imageMapY + 1, remaining, Math.max(1, imageMapHeight - 2));
+    }
     for (const stop of stopsRef.current) {
       const x = imageMapX + (stop.center / image.width) * imageMapWidth;
       mapCtx.fillStyle = "#f5f4ea";
       mapCtx.fillRect(x - mapDpr, imageMapY, 2 * mapDpr, imageMapHeight);
     }
-  }, [metrics]);
+  }, [metrics, normalizeOffset]);
 
   useEffect(() => {
     const image = new Image();
@@ -126,12 +155,15 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
       offsetRef.current = 0;
       stretchRef.current = 0;
       setReady(true);
-      requestAnimationFrame(draw);
+      requestAnimationFrame(() => {
+        draw();
+        onReady?.({ width: image.width, height: image.height, wrap: wrapRef.current });
+      });
     };
     image.onerror = () => onLoadError?.();
     image.src = src;
     return () => { image.onload = null; image.onerror = null; };
-  }, [src, draw, onLoadError]);
+  }, [src, draw, onLoadError, onReady]);
 
   useEffect(() => {
     if (!ready) return undefined;
@@ -145,46 +177,72 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   const animateTo = useCallback((target, duration = 520) => {
     cancelAnimationFrame(frameRef.current);
     const startOffset = offsetRef.current;
+    let finalTarget = normalizeOffset(target);
+    const image = imageRef.current;
+    const { maxOffset } = metrics();
+    if (wrapRef.current && image && maxOffset === image.width) {
+      let delta = finalTarget - normalizeOffset(startOffset);
+      if (delta > image.width / 2) delta -= image.width;
+      if (delta < -image.width / 2) delta += image.width;
+      finalTarget = startOffset + delta;
+    }
     const startTime = performance.now();
     const tick = (now) => {
       const progress = Math.min(1, (now - startTime) / duration);
       const eased = 1 - Math.pow(1 - progress, 4);
-      offsetRef.current = startOffset + (target - startOffset) * eased;
+      offsetRef.current = startOffset + (finalTarget - startOffset) * eased;
       stretchRef.current *= 1 - eased;
       draw();
       if (progress < 1) frameRef.current = requestAnimationFrame(tick);
-      else stretchRef.current = 0;
+      else {
+        offsetRef.current = normalizeOffset(offsetRef.current);
+        stretchRef.current = 0;
+        draw();
+      }
     };
     frameRef.current = requestAnimationFrame(tick);
-  }, [draw]);
+  }, [draw, metrics, normalizeOffset]);
 
   const nearestStop = useCallback((direction = 0) => {
     const { viewWidth } = metrics();
-    const currentCenter = offsetRef.current + viewWidth / 2;
+    const image = imageRef.current;
+    const circular = wrapRef.current && image && image.width > viewWidth;
+    const currentCenter = circular
+      ? normalizeOffset(offsetRef.current + viewWidth / 2)
+      : offsetRef.current + viewWidth / 2;
     const ordered = [...stopsRef.current].sort((a, b) => a.center - b.center);
     if (!ordered.length) return null;
-    let target = ordered.reduce((best, item) => Math.abs(item.center - currentCenter) < Math.abs(best.center - currentCenter) ? item : best);
-    if (direction > 0) target = ordered.find((item) => item.center > currentCenter + 8) || ordered[0];
-    if (direction < 0) target = [...ordered].reverse().find((item) => item.center < currentCenter - 8) || ordered.at(-1);
+    const forwardDistance = (center) => circular ? ((center - currentCenter + image.width) % image.width) : center - currentCenter;
+    const backwardDistance = (center) => circular ? ((currentCenter - center + image.width) % image.width) : currentCenter - center;
+    const circularDistance = (center) => circular
+      ? Math.min(forwardDistance(center), backwardDistance(center))
+      : Math.abs(center - currentCenter);
+    let target = ordered.reduce((best, item) => circularDistance(item.center) < circularDistance(best.center) ? item : best);
+    if (direction > 0) target = ordered.filter((item) => forwardDistance(item.center) > 8).sort((a, b) => forwardDistance(a.center) - forwardDistance(b.center))[0] || target;
+    if (direction < 0) target = ordered.filter((item) => backwardDistance(item.center) > 8).sort((a, b) => backwardDistance(a.center) - backwardDistance(b.center))[0] || target;
     return target;
-  }, [metrics]);
+  }, [metrics, normalizeOffset]);
 
   useImperativeHandle(ref, () => ({
     getCenter() {
-      return offsetRef.current + metrics().viewWidth / 2;
+      const { viewWidth } = metrics();
+      const image = imageRef.current;
+      return wrapRef.current && image && image.width > viewWidth
+        ? normalizeOffset(offsetRef.current + viewWidth / 2)
+        : offsetRef.current + viewWidth / 2;
     },
     getPanoramaWidth() {
       return imageRef.current?.width || 0;
     },
     jumpToCenter(center) {
       const { viewWidth, maxOffset } = metrics();
-      animateTo(clamp(center - viewWidth / 2, 0, maxOffset));
+      animateTo(normalizeOffset(center - viewWidth / 2));
     },
     moveToStop(direction) {
       const stop = nearestStop(direction);
       if (!stop) return false;
       const { viewWidth, maxOffset } = metrics();
-      animateTo(clamp(stop.center - viewWidth / 2, 0, maxOffset));
+      animateTo(normalizeOffset(stop.center - viewWidth / 2));
       return stop.id;
     },
     detectEdges() {
@@ -223,9 +281,49 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
         if (spaced.length === 18) break;
         if (spaced.every((item) => Math.abs(item.x - peak.x) >= minimumSpacing)) spaced.push(peak);
       }
+      if (wrapRef.current && spaced.length >= 4) {
+        const quarter = width / 4;
+        const tolerance = width * .12;
+        let bestCorners = null;
+        let bestScore = -Infinity;
+        for (const phase of spaced) {
+          const chosen = [];
+          let score = 0;
+          for (let wall = 0; wall < 4; wall++) {
+            const expected = (phase.x + wall * quarter) % width;
+            const nearest = spaced
+              .filter((peak) => chosen.every((item) => item !== peak))
+              .map((peak) => {
+                const distance = Math.abs(peak.x - expected);
+                return { peak, distance: Math.min(distance, width - distance) };
+              })
+              .sort((a, b) => a.distance - b.distance)[0];
+            if (!nearest || nearest.distance > tolerance) break;
+            chosen.push(nearest.peak);
+            score += nearest.peak.score - nearest.distance * .2;
+          }
+          if (chosen.length === 4 && score > bestScore) {
+            bestCorners = chosen;
+            bestScore = score;
+          }
+        }
+        if (bestCorners) {
+          return bestCorners.sort((a, b) => a.x - b.x).map((peak) => (peak.x / width) * image.width);
+        }
+        const likelyCorners = [];
+        for (const peak of spaced) {
+          const distantFromAll = likelyCorners.every((item) => {
+            const distance = Math.abs(item.x - peak.x);
+            return Math.min(distance, width - distance) >= width * .14;
+          });
+          if (distantFromAll) likelyCorners.push(peak);
+          if (likelyCorners.length === 4) break;
+        }
+        return likelyCorners.sort((a, b) => a.x - b.x).map((peak) => (peak.x / width) * image.width);
+      }
       return spaced.map((peak) => (peak.x / width) * image.width);
     },
-  }), [animateTo, metrics, nearestStop]);
+  }), [animateTo, metrics, nearestStop, normalizeOffset]);
 
   function onPointerDown(event) {
     if (!imageRef.current) return;
@@ -245,8 +343,9 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     if (!pointer || pointer.id !== event.pointerId) return;
     const { scale, maxOffset } = metrics();
     const rawOffset = pointer.startOffset - (event.clientX - pointer.startX) / scale;
-    offsetRef.current = clamp(rawOffset, 0, maxOffset);
-    const overshoot = rawOffset < 0 ? -rawOffset : rawOffset > maxOffset ? maxOffset - rawOffset : 0;
+    const circular = wrapRef.current && maxOffset === imageRef.current.width;
+    offsetRef.current = normalizeOffset(rawOffset);
+    const overshoot = circular ? 0 : rawOffset < 0 ? -rawOffset : rawOffset > maxOffset ? maxOffset - rawOffset : 0;
     stretchRef.current = Math.sign(overshoot) * Math.min(26, Math.abs(overshoot) * scale * .32);
     const now = performance.now();
     velocityRef.current = -((event.clientX - pointer.lastX) / scale) / Math.max(8, now - pointer.lastTime);
@@ -265,12 +364,12 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
       const stop = nearestStop();
       if (stop) {
         const { viewWidth, maxOffset } = metrics();
-        animateTo(clamp(stop.center - viewWidth / 2, 0, maxOffset));
+        animateTo(normalizeOffset(stop.center - viewWidth / 2));
         return;
       }
     }
     const { maxOffset } = metrics();
-    const destination = clamp(offsetRef.current + velocityRef.current * 260, 0, maxOffset);
+    const destination = normalizeOffset(offsetRef.current + velocityRef.current * 260);
     animateTo(destination, clamp(Math.abs(destination - offsetRef.current) * .65, 220, 850));
   }
 
@@ -281,12 +380,12 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
       const stop = nearestStop(event.key === "ArrowRight" ? 1 : -1);
       if (stop) {
         const { viewWidth, maxOffset } = metrics();
-        animateTo(clamp(stop.center - viewWidth / 2, 0, maxOffset));
+        animateTo(normalizeOffset(stop.center - viewWidth / 2));
       }
       return;
     }
     const { viewWidth, maxOffset } = metrics();
-    animateTo(clamp(offsetRef.current + (event.key === "ArrowRight" ? 1 : -1) * viewWidth * .72, 0, maxOffset));
+    animateTo(normalizeOffset(offsetRef.current + (event.key === "ArrowRight" ? 1 : -1) * viewWidth * .72));
   }
 
   function onMapPointerDown(event) {
@@ -296,7 +395,7 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     const imageLeft = (bounds.width - imageRef.current.width * mapScale) / 2;
     const imageX = clamp((event.clientX - bounds.left - imageLeft) / mapScale, 0, imageRef.current.width);
     const { viewWidth, maxOffset } = metrics();
-    animateTo(clamp(imageX - viewWidth / 2, 0, maxOffset));
+    animateTo(normalizeOffset(imageX - viewWidth / 2));
   }
 
   return (
@@ -314,12 +413,12 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
           onKeyDown={onKeyDown}
         />
         <div className="panorama-guidance"><span className="move-icon">↔</span> {canPan ? "DRAG TO LOOK AROUND" : "PAN TOO NARROW"}</div>
-        {ready && !canPan && <div className="panorama-narrow-hint">This pan is too narrow to explore. Record with your phone sideways and sweep slowly from left to right.</div>}
+        {ready && !canPan && <div className="panorama-narrow-hint">This panorama is too narrow to explore. Hold your phone sideways and make one full, slow turn around the room.</div>}
         <div className="panorama-caption"><span>INTERACTIVE VIEW</span><span>01 — 01</span></div>
         {!ready && <div className="panorama-loading">Loading your view…</div>}
       </div>
       <div className="minimap-block">
-        <div className="minimap-label"><span>THE WHOLE PAN</span><span>CLICK TO JUMP</span></div>
+        <div className="minimap-label"><span>{wrap ? "FULL ROOM / 360°" : "THE WHOLE PAN"}</span><span>TAP TO JUMP</span></div>
         <canvas
           ref={mapRef}
           className="minimap-canvas"
@@ -331,11 +430,11 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               const { viewWidth, maxOffset } = metrics();
-              animateTo(clamp(imageRef.current.width / 2 - viewWidth / 2, 0, maxOffset));
+              animateTo(normalizeOffset(imageRef.current.width / 2 - viewWidth / 2));
             }
           }}
         />
-        <div className="minimap-ends"><span>LEFT EDGE</span><span>RIGHT EDGE</span></div>
+        <div className="minimap-ends"><span>{wrap ? "START" : "LEFT EDGE"}</span><span>{wrap ? "LOOP BACK" : "RIGHT EDGE"}</span></div>
       </div>
     </div>
   );
