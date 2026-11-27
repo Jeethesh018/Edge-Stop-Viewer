@@ -1,0 +1,20 @@
+{
+  "name": "edge-stop-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader runner",
+    "build": "vite build --configLoader runner",
+    "preview": "vite preview --configLoader runner"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "vite": "^7.1.12"
+  }
+}
+
