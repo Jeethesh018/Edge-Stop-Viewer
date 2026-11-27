@@ -26,6 +26,10 @@ Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and br
 
 For frontend development with Vite hot reload, start FastAPI in one terminal, then run `npm run dev` in another and open <http://127.0.0.1:5173>.
 
+## Deploy to Vercel
+
+The included `vercel.json` builds the Vite frontend into `app/static` and routes `/stitch` to the FastAPI Python function. The browser recorder uses a lower bitrate to keep typical 30-second clips within the default function upload limit. Larger existing video files may need to be shortened or compressed before upload.
+
 ## Create a sample video
 
 Generate a synthetic, textured pan video for trying the stitch endpoint without a camera:
@@ -43,4 +47,3 @@ Then open the app, choose the video file, and press **Stitch video**. The result
 - Input panorama images are loaded directly in the browser and are not sent to the backend.
 - **Detect edges** scores horizontal luminance gradients by image column, smooths the score, and adds the strongest spaced peaks as stops.
 - The in-memory viewer and its stop pins reset when the page is reloaded.
-

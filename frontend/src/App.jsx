@@ -135,6 +135,9 @@ function App() {
       const response = await fetch("/stitch", { method: "POST", body: formData });
       if (!response.ok) {
         let detail = "Couldn't stitch. Pan slower with good light and try again.";
+        if (response.status === 413) {
+          detail = "This video is too large for the deployment upload limit. Record in Edge Stop Viewer or shorten and compress the clip.";
+        }
         try { detail = (await response.json()).detail || detail; } catch { /* Keep the clear fallback. */ }
         throw new Error(detail);
       }
@@ -160,7 +163,11 @@ function App() {
     let cameraStream = null;
     try {
       cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       if (cancelCaptureRef.current) {
@@ -170,7 +177,9 @@ function App() {
       setStream(cameraStream);
       const types = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
       const mimeType = types.find((type) => MediaRecorder.isTypeSupported(type));
-      const nextRecorder = mimeType ? new MediaRecorder(cameraStream, { mimeType }) : new MediaRecorder(cameraStream);
+      const recorderOptions = { videoBitsPerSecond: 850_000 };
+      if (mimeType) recorderOptions.mimeType = mimeType;
+      const nextRecorder = new MediaRecorder(cameraStream, recorderOptions);
       const chunks = [];
       nextRecorder.addEventListener("dataavailable", (event) => event.data.size && chunks.push(event.data));
       nextRecorder.addEventListener("stop", () => {
@@ -359,4 +368,3 @@ function App() {
 }
 
 export default App;
-

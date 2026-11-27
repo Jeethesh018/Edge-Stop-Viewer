@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "buildCommand": "npm run build",
+  "outputDirectory": "app/static",
+  "functions": {
+    "api/stitch.py": {
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [
+    { "source": "/stitch", "destination": "/api/stitch" }
+  ]
+}

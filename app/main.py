@@ -96,6 +96,7 @@ def stitch_video(video_bytes: bytes, suffix: str = ".mp4") -> bytes:
             temp_path.unlink(missing_ok=True)
 
 
+@app.post("/api/stitch", include_in_schema=False)
 @app.post("/stitch")
 async def stitch(file: UploadFile = File(...)) -> Response:
     """Receive a recorded pan and return its stitched panorama as a JPEG."""
@@ -111,5 +112,4 @@ async def stitch(file: UploadFile = File(...)) -> Response:
     return Response(content=image_bytes, media_type="image/jpeg")
 
 
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
-
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True, check_dir=False), name="frontend")
