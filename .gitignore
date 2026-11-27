@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.py[cod]
+sample-pan.mp4
+node_modules/
+frontend/node_modules/
+
