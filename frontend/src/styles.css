@@ -140,7 +140,7 @@ button:focus-visible, canvas:focus-visible { outline: 2px solid #899e5b; outline
 .rec-indicator, .timer-display { display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; background: #10140fbf; color: #eee; border: 1px solid #ffffff1c; font-size: 8px; }
 .rec-indicator i { width: 7px; height: 7px; background: #e76e59; border-radius: 50%; box-shadow: 0 0 8px #e76e5980; }
 .timer-display { font-size: 10px; }.timer-display span { color: #a1a69b; font-size: 8px; }
-.camera-instruction { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; gap: 10px; align-items: center; white-space: nowrap; padding: 12px 16px; background: #111610cc; color: #f5f4eb; border: 1px solid #ffffff28; font-size: 12px; }
+.camera-instruction { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; gap: 10px; align-items: center; text-align: center; padding: 12px 16px; background: #111610cc; color: #f5f4eb; border: 1px solid #ffffff28; font-size: 12px; }
 .instruction-icon { color: var(--lime); font-size: 18px; }
 .camera-guides { position: absolute; left: 24px; right: 24px; bottom: 20px; display: flex; align-items: center; gap: 12px; color: #d8dccf; font-size: 7px; }
 .camera-guides>i { height: 1px; flex: 1; position: relative; background: #ecefe55d; }
