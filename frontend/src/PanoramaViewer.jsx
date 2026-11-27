@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 3628)
-Total output lines: 345
-
 import {
   forwardRef,
   useCallback,
@@ -173,7 +170,21 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   }, [metrics]);
 
   useImperativeHandle(ref, () => ({
-  …128 tokens truncated…Offset));
+    getCenter() {
+      return offsetRef.current + metrics().viewWidth / 2;
+    },
+    getPanoramaWidth() {
+      return imageRef.current?.width || 0;
+    },
+    jumpToCenter(center) {
+      const { viewWidth, maxOffset } = metrics();
+      animateTo(clamp(center - viewWidth / 2, 0, maxOffset));
+    },
+    moveToStop(direction) {
+      const stop = nearestStop(direction);
+      if (!stop) return false;
+      const { viewWidth, maxOffset } = metrics();
+      animateTo(clamp(stop.center - viewWidth / 2, 0, maxOffset));
       return stop.id;
     },
     detectEdges() {
@@ -331,4 +342,3 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
 });
 
 export default PanoramaViewer;
-
