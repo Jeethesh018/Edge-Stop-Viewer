@@ -125,6 +125,17 @@ function App() {
     setScreen("home");
   }, []);
 
+  const handleViewerReady = useCallback(({ wrap }) => {
+    if (!wrap) return;
+    const corners = viewerRef.current?.detectEdges() || [];
+    const automaticStops = corners.map((center, index) => ({ id: index + 1, center }));
+    setStops(automaticStops);
+    nextStopIdRef.current = automaticStops.length + 1;
+    setStatusMessage(automaticStops.length === 4
+      ? "Full room view ready. Four wall-corner stops were added automatically."
+      : `Full room view ready. ${automaticStops.length} strong wall edges were added as stops.`);
+  }, []);
+
   async function stitchVideo(file, filename = file.name || "camera-pan.webm") {
     setScreen("processing");
     setProcessingStep(0);
@@ -141,7 +152,11 @@ function App() {
         try { detail = (await response.json()).detail || detail; } catch { /* Keep the clear fallback. */ }
         throw new Error(detail);
       }
-      setPanorama({ src: URL.createObjectURL(await response.blob()), owned: true });
+      setPanorama({
+        src: URL.createObjectURL(await response.blob()),
+        owned: true,
+        wrap: response.headers.get("X-Panorama-Wrap") === "true",
+      });
       setStops([]);
       nextStopIdRef.current = 1;
       setStatusMessage("Panorama ready. Drag through the view or detect architectural edges.");
@@ -265,7 +280,7 @@ function App() {
     ["Reading your pan", "Finding the clearest frames in your recording."],
     ["Matching the overlap", "Aligning shared details from frame to frame."],
     ["Stitching the scene", "Blending each frame into one continuous view."],
-    ["Finishing the panorama", "Trimming the edges and preparing your view."],
+    ["Finishing the panorama", "A full room turn can take up to two minutes while the wall views are aligned."],
   ][processingStep];
 
   return (
@@ -285,9 +300,9 @@ function App() {
           <main className="home-main">
             <section className="hero-section">
               <div className="hero-copy">
-                <div className="eyebrow"><span className="eyebrow-dash" /> A WIDER VIEW OF EVERY SPACE</div>
+                <div className="eyebrow"><span className="eyebrow-dash" /> A FULL TURN AROUND THE ROOM</div>
                 <h1>See the whole<br /><em>space.</em></h1>
-                <p className="hero-description">A simple camera pan, made into a space you can explore. Mark the edges, save a detail, and find your way back.</p>
+                <p className="hero-description">Record one slow turn inside a room. Explore the complete panorama and get wall-corner stops automatically.</p>
                 <div className="hero-actions">
                   <button className="button button-dark" onClick={startCapture} type="button"><span className="button-record-dot" /> Start a capture <Chevron /></button>
                   <button className="button button-quiet" onClick={() => imageInputRef.current?.click()} type="button"><span className="button-open-icon">↗</span> Open a panorama</button>
@@ -314,15 +329,15 @@ function App() {
 
       {screen === "camera" && (
         <main className="workspace capture-workspace">
-          <div className="workspace-head"><div><div className="eyebrow"><span className="eyebrow-dash" /> LIVE CAPTURE</div><h1>Take your time.<br /><em>Move in one line.</em></h1></div><button className="quiet-link" onClick={goHome} type="button">← Back to start</button></div>
+          <div className="workspace-head"><div><div className="eyebrow"><span className="eyebrow-dash" /> LIVE CAPTURE / 360°</div><h1>One full turn.<br /><em>Take it slowly.</em></h1></div><button className="quiet-link" onClick={goHome} type="button">← Back to start</button></div>
           <div className="camera-frame">
             <video ref={cameraRef} autoPlay playsInline muted />
             <div className="camera-topline"><span className="rec-indicator"><i /> RECORDING</span><span className="timer-display">00:{String(elapsed).padStart(2, "0")} <span>/ 00:30</span></span></div>
-            <div className="camera-instruction"><span className="instruction-icon">↔</span><span>Pan slowly from left to right</span></div>
-            <div className="camera-guides"><span>START</span><i><b /></i><span>END</span></div>
+            <div className="camera-instruction"><span className="instruction-icon">↻</span><span>Turn once, slowly, all the way around</span></div>
+            <div className="camera-guides"><span>START</span><i><b /></i><span>BACK TO START</span></div>
             <div className="camera-corner camera-corner-tl" /><div className="camera-corner camera-corner-tr" /><div className="camera-corner camera-corner-bl" /><div className="camera-corner camera-corner-br" />
           </div>
-          <div className="capture-footer"><p><span className="note-star">✳</span> Keep your phone level and move at an even pace.</p><button className="button button-stop" onClick={stopCapture} type="button"><span className="stop-square" /> Stop &amp; stitch <Chevron /></button></div>
+          <div className="capture-footer"><p><span className="note-star">✳</span> Hold the phone sideways near the room center. Keep it level and finish where you started.</p><button className="button button-stop" onClick={stopCapture} type="button"><span className="stop-square" /> Stop &amp; stitch <Chevron /></button></div>
         </main>
       )}
 
@@ -332,7 +347,7 @@ function App() {
           <div className="eyebrow"><span className="eyebrow-dash" /> WORKING ON YOUR PANORAMA</div>
           <h1>{processCopy[0]}</h1><p>{processCopy[1]}</p>
           <div className="processing-progress"><i /></div>
-          <span className="processing-caption">A GOOD PANORAMA TAKES A MOMENT</span>
+          <span className="processing-caption">FULL ROOM STITCHING CAN TAKE UP TO TWO MINUTES</span>
         </main>
       )}
 
@@ -346,7 +361,7 @@ function App() {
             </div>
           </div>
           <div className="viewer-card">
-            <PanoramaViewer key={panorama.src} ref={viewerRef} src={panorama.src} stops={stops} snapToStops={snapToStops} onLoadError={handlePanoramaError} />
+            <PanoramaViewer key={panorama.src} ref={viewerRef} src={panorama.src} stops={stops} snapToStops={snapToStops} wrap={panorama.wrap} onReady={handleViewerReady} onLoadError={handlePanoramaError} />
             <div className="viewer-controls">
               <div className="stop-navigation"><button className="nav-square" aria-label="Previous stop" onClick={() => viewerRef.current?.moveToStop(-1)} type="button">←</button><button className="nav-square" aria-label="Next stop" onClick={() => viewerRef.current?.moveToStop(1)} type="button">→</button><span className="control-divider" /><button className="button button-add" onClick={addCurrentStop} type="button"><span>＋</span> Add stop here</button><button className="button button-edge" onClick={detectEdges} type="button"><span>⌁</span> Detect edges</button></div>
               <span className="stop-total"><b>{String(stops.length).padStart(2, "0")}</b> {stops.length === 1 ? "STOP" : "STOPS"}</span>
@@ -359,7 +374,7 @@ function App() {
       {screen === "videoUpload" && (
         <main className="workspace upload-workspace">
           <div className="workspace-head"><div><div className="eyebrow"><span className="eyebrow-dash" /> STITCH A RECORDING</div><h1>Bring the pan.</h1></div><button className="quiet-link" onClick={goHome} type="button">← Back to start</button></div>
-          <div className="upload-panel"><div className="upload-glyph">↥</div><h2>Choose your camera pan</h2><p>A steady, left-to-right sweep gives the stitcher the best overlap.</p><span className="upload-types">MP4 · MOV · WEBM &nbsp; / &nbsp; UP TO 30 SECONDS</span><button className="button button-dark" onClick={() => videoInputRef.current?.click()} type="button">Choose a video <Chevron /></button></div>
+          <div className="upload-panel"><div className="upload-glyph">↥</div><h2>Choose a full room turn</h2><p>Upload one steady video recorded sideways as you turn once around the room and end where you started.</p><span className="upload-types">MP4 · MOV · WEBM &nbsp; / &nbsp; UP TO 30 SECONDS</span><button className="button button-dark" onClick={() => videoInputRef.current?.click()} type="button">Choose a video <Chevron /></button></div>
           {error && <p className="inline-error upload-error" role="alert">{error}</p>}
         </main>
       )}
