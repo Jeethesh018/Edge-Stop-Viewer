@@ -190,6 +190,7 @@ button:focus-visible, canvas:focus-visible { outline: 2px solid #899e5b; outline
 .panorama-canvas:active { cursor: grabbing; }
 .panorama-guidance, .panorama-caption { position: absolute; top: 13px; padding: 8px 10px; background: #101510c9; color: #e9ecdf; font-size: 7px; pointer-events: none; }
 .panorama-guidance { left: 13px; }.panorama-caption { right: 13px; color: #bcc3ae; }.move-icon { color: var(--lime); font-size: 12px; margin-right: 5px; }
+.panorama-narrow-hint { position: absolute; inset: auto 16px 16px; max-width: 420px; padding: 11px 13px; background: #101510df; color: #f1f2e9; font: 10px/1.5 var(--sans); pointer-events: none; }
 .panorama-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #eee; background: #141914ed; font-size: 12px; }
 .panorama-view.is-ready .panorama-loading { display: none; }
 .minimap-block { padding: 15px 5px 3px; }
@@ -272,4 +273,3 @@ button:focus-visible, canvas:focus-visible { outline: 2px solid #899e5b; outline
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
-

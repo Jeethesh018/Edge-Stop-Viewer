@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 3628)
+Total output lines: 345
+
 import {
   forwardRef,
   useCallback,
@@ -22,6 +25,8 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   const stopsRef = useRef(stops);
   const snapRef = useRef(snapToStops);
   const [ready, setReady] = useState(false);
+  const [canPan, setCanPan] = useState(false);
+  const canPanRef = useRef(false);
   stopsRef.current = stops;
   snapRef.current = snapToStops;
 
@@ -47,15 +52,22 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
       view.width = viewWidthPx;
       view.height = viewHeightPx;
     }
-    const { viewWidth } = metrics();
+    const { viewWidth, maxOffset } = metrics();
+    const hasHorizontalOverflow = maxOffset > 1;
+    if (canPanRef.current !== hasHorizontalOverflow) {
+      canPanRef.current = hasHorizontalOverflow;
+      setCanPan(hasHorizontalOverflow);
+    }
     const imageScale = view.height / image.height;
     const ctx = view.getContext("2d");
     ctx.fillStyle = "#141914";
     ctx.fillRect(0, 0, view.width, view.height);
-    ctx.drawImage(image, -offsetRef.current * imageScale + stretchRef.current * dpr, 0, image.width * imageScale, view.height);
+    const imageWidth = image.width * imageScale;
+    const centeredOffset = maxOffset === 0 ? (view.width - imageWidth) / 2 : 0;
+    ctx.drawImage(image, centeredOffset - offsetRef.current * imageScale + stretchRef.current * dpr, 0, imageWidth, view.height);
 
     for (const stop of stopsRef.current) {
-      const x = (stop.center - offsetRef.current) * imageScale + stretchRef.current * dpr;
+      const x = centeredOffset + (stop.center - offsetRef.current) * imageScale + stretchRef.current * dpr;
       if (x < -20 * dpr || x > view.width + 20 * dpr) continue;
       ctx.beginPath();
       ctx.moveTo(x, 48 * dpr);
@@ -85,20 +97,27 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     }
     const mapCtx = map.getContext("2d");
     mapCtx.clearRect(0, 0, mapWidth, mapHeight);
-    mapCtx.drawImage(image, 0, 0, mapWidth, mapHeight);
-    mapCtx.fillStyle = "#10151055";
+    const mapScale = Math.min(mapWidth / image.width, mapHeight / image.height);
+    const imageMapWidth = image.width * mapScale;
+    const imageMapHeight = image.height * mapScale;
+    const imageMapX = (mapWidth - imageMapWidth) / 2;
+    const imageMapY = (mapHeight - imageMapHeight) / 2;
+    mapCtx.fillStyle = "#283229";
     mapCtx.fillRect(0, 0, mapWidth, mapHeight);
-    const boxX = (offsetRef.current / image.width) * mapWidth;
-    const boxWidth = Math.min(mapWidth, (viewWidth / image.width) * mapWidth);
+    mapCtx.drawImage(image, imageMapX, imageMapY, imageMapWidth, imageMapHeight);
+    mapCtx.fillStyle = "#10151055";
+    mapCtx.fillRect(imageMapX, imageMapY, imageMapWidth, imageMapHeight);
+    const boxX = imageMapX + (offsetRef.current / image.width) * imageMapWidth;
+    const boxWidth = Math.min(imageMapWidth, (viewWidth / image.width) * imageMapWidth);
     mapCtx.fillStyle = "#d6f27638";
-    mapCtx.fillRect(boxX, 0, boxWidth, mapHeight);
+    mapCtx.fillRect(boxX, imageMapY, boxWidth, imageMapHeight);
     mapCtx.strokeStyle = "#d6f276";
     mapCtx.lineWidth = 2 * mapDpr;
-    mapCtx.strokeRect(boxX, 1, boxWidth, mapHeight - 2);
+    mapCtx.strokeRect(boxX, imageMapY + 1, boxWidth, Math.max(1, imageMapHeight - 2));
     for (const stop of stopsRef.current) {
-      const x = (stop.center / image.width) * mapWidth;
+      const x = imageMapX + (stop.center / image.width) * imageMapWidth;
       mapCtx.fillStyle = "#f5f4ea";
-      mapCtx.fillRect(x - mapDpr, 0, 2 * mapDpr, mapHeight);
+      mapCtx.fillRect(x - mapDpr, imageMapY, 2 * mapDpr, imageMapHeight);
     }
   }, [metrics]);
 
@@ -154,21 +173,7 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   }, [metrics]);
 
   useImperativeHandle(ref, () => ({
-    getCenter() {
-      return offsetRef.current + metrics().viewWidth / 2;
-    },
-    getPanoramaWidth() {
-      return imageRef.current?.width || 0;
-    },
-    jumpToCenter(center) {
-      const { viewWidth, maxOffset } = metrics();
-      animateTo(clamp(center - viewWidth / 2, 0, maxOffset));
-    },
-    moveToStop(direction) {
-      const stop = nearestStop(direction);
-      if (!stop) return false;
-      const { viewWidth, maxOffset } = metrics();
-      animateTo(clamp(stop.center - viewWidth / 2, 0, maxOffset));
+  …128 tokens truncated…Offset));
       return stop.id;
     },
     detectEdges() {
@@ -244,7 +249,8 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
     if (!pointer || pointer.id !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     pointerRef.current = null;
-    if (snapRef.current && stopsRef.current.length) {
+    // One stop should not pull every drag back to the same center.
+    if (snapRef.current && stopsRef.current.length > 1) {
       const stop = nearestStop();
       if (stop) {
         const { viewWidth, maxOffset } = metrics();
@@ -275,9 +281,11 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
   function onMapPointerDown(event) {
     if (!imageRef.current) return;
     const bounds = event.currentTarget.getBoundingClientRect();
-    const ratio = clamp((event.clientX - bounds.left) / bounds.width, 0, 1);
+    const mapScale = Math.min(bounds.width / imageRef.current.width, bounds.height / imageRef.current.height);
+    const imageLeft = (bounds.width - imageRef.current.width * mapScale) / 2;
+    const imageX = clamp((event.clientX - bounds.left - imageLeft) / mapScale, 0, imageRef.current.width);
     const { viewWidth, maxOffset } = metrics();
-    animateTo(clamp(ratio * imageRef.current.width - viewWidth / 2, 0, maxOffset));
+    animateTo(clamp(imageX - viewWidth / 2, 0, maxOffset));
   }
 
   return (
@@ -294,7 +302,8 @@ const PanoramaViewer = forwardRef(function PanoramaViewer({ src, stops, snapToSt
           onPointerCancel={onPointerUp}
           onKeyDown={onKeyDown}
         />
-        <div className="panorama-guidance"><span className="move-icon">↔</span> DRAG TO LOOK AROUND</div>
+        <div className="panorama-guidance"><span className="move-icon">↔</span> {canPan ? "DRAG TO LOOK AROUND" : "PAN TOO NARROW"}</div>
+        {ready && !canPan && <div className="panorama-narrow-hint">This pan is too narrow to explore. Record with your phone sideways and sweep slowly from left to right.</div>}
         <div className="panorama-caption"><span>INTERACTIVE VIEW</span><span>01 — 01</span></div>
         {!ready && <div className="panorama-loading">Loading your view…</div>}
       </div>
