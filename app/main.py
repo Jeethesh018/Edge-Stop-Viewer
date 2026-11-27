@@ -7,6 +7,7 @@ import tempfile
 
 import cv2
 import numpy as np
+import logging
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = FastAPI(title="Edge Stop Viewer", version="1.0.0")
+logger = logging.getLogger(__name__)
 
 
 def _trim_black_borders(image: np.ndarray) -> np.ndarray:
@@ -78,10 +80,38 @@ def stitch_video(video_bytes: bytes, suffix: str = ".mp4") -> bytes:
         if len(frames) < 2:
             raise ValueError("The video is too short. Record a slow pan for a few seconds.")
 
-        stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
-        stitcher.setPanoConfidenceThresh(0.6)
-        status, panorama = stitcher.stitch(frames)
-        if status != cv2.Stitcher_OK or panorama is None:
+        # Long recordings can produce about 100 samples. Keep the full 0.3s
+        # extraction above, but use a uniform subset so feature matching stays
+        # responsive in a serverless function.
+        if len(frames) > 30:
+            frame_indices = np.linspace(0, len(frames) - 1, 30, dtype=int)
+            frames = [frames[index] for index in frame_indices]
+
+        panorama = None
+        last_status = cv2.Stitcher_ERR_NEED_MORE_IMGS
+        # A phone pan is usually close to a planar scan. Scan mode is much faster
+        # for that motion; retain panorama mode as a fallback for perspective.
+        cv2.setNumThreads(2)
+        for mode in (cv2.Stitcher_SCANS, cv2.Stitcher_PANORAMA):
+            stitcher = cv2.Stitcher_create(mode)
+            stitcher.setPanoConfidenceThresh(0.25)
+            # Feature registration is the expensive part. Keep it at a smaller
+            # scale while the compositor still uses the full 1000px frames.
+            stitcher.setRegistrationResol(0.04)
+            stitcher.setSeamEstimationResol(0.04)
+            last_status, candidate = stitcher.stitch(frames)
+            if last_status == cv2.Stitcher_OK and candidate is not None:
+                panorama = candidate
+                break
+
+        if panorama is None:
+            logger.warning(
+                "Panorama registration failed (status=%s, frames=%s, size=%sx%s)",
+                last_status,
+                len(frames),
+                frames[0].shape[1],
+                frames[0].shape[0],
+            )
             raise ValueError("Couldn't stitch. Pan slower with good light and try again.")
 
         panorama = _trim_black_borders(panorama)
@@ -105,6 +135,7 @@ async def stitch(file: UploadFile = File(...)) -> Response:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except cv2.error as exc:
+        logger.exception("OpenCV raised an error while stitching the uploaded video")
         raise HTTPException(
             status_code=422,
             detail="Couldn't stitch. Pan slower with good light and try again.",

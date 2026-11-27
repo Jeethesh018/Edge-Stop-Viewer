@@ -22,7 +22,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Record a steady left-to-right pan in good light; videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds, resizes frames to 1000 pixels wide, stitches with OpenCV's panorama mode, trims black borders, and returns a JPEG.
+Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Record a steady left-to-right pan in good light; videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds and resizes frames to 1000 pixels wide. It uses OpenCV scan mode for ordinary horizontal phone pans, then falls back to panorama mode for perspective motion. Feature matching runs at a reduced resolution for faster processing while the final composite uses the 1000-pixel frames. Black borders are trimmed and the panorama is returned as a JPEG.
 
 For frontend development with Vite hot reload, start FastAPI in one terminal, then run `npm run dev` in another and open <http://127.0.0.1:5173>.
 
