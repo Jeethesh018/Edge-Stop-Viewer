@@ -96,10 +96,18 @@ def stitch_video(video_bytes: bytes, suffix: str = ".mp4") -> tuple[bytes, bool]
             orb = cv2.ORB_create(800)
             start_keypoints, start_descriptors = orb.detectAndCompute(gray_start, None)
             end_keypoints, end_descriptors = orb.detectAndCompute(gray_end, None)
-            if start_descriptors is not None and end_descriptors is not None:
-                matches = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(
-                    start_descriptors, end_descriptors, k=2
-                )
+            if (
+                start_descriptors is not None
+                and end_descriptors is not None
+                and len(start_descriptors) >= 2
+                and len(end_descriptors) >= 2
+            ):
+                try:
+                    matches = cv2.BFMatcher(cv2.NORM_HAMMING).knnMatch(
+                        start_descriptors, end_descriptors, k=2
+                    )
+                except cv2.error:
+                    matches = []
                 overlap_matches = [
                     first for pair in matches if len(pair) == 2
                     for first, second in [pair] if first.distance < 0.7 * second.distance
