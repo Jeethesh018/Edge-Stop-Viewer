@@ -9,6 +9,82 @@ function Chevron({ direction = "right" }) {
   return <svg className={`chevron chevron-${direction}`} width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
+const MAX_STITCH_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+async function compressVideoForUpload(file) {
+  if (file.size <= MAX_STITCH_UPLOAD_BYTES) return file;
+  if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+    throw new Error("This phone's browser can't compress the selected video. Use the in-app camera or choose a shorter clip.");
+  }
+
+  const sourceUrl = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.src = sourceUrl;
+  try {
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = () => reject(new Error("Couldn't read that video. Try an MP4 or WebM recording."));
+      video.load();
+    });
+    if (video.duration > 30.5) {
+      throw new Error("Videos must be 30 seconds or shorter. Trim this clip and try again.");
+    }
+    const scale = Math.min(1, 1280 / video.videoWidth, 720 / video.videoHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(2, Math.floor(video.videoWidth * scale / 2) * 2);
+    canvas.height = Math.max(2, Math.floor(video.videoHeight * scale / 2) * 2);
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) throw new Error("Couldn't prepare this video for upload. Try the in-app camera instead.");
+
+    const stream = canvas.captureStream(20);
+    const mimeType = ["video/webm;codecs=vp8", "video/webm", "video/mp4"]
+      .find((type) => MediaRecorder.isTypeSupported(type));
+    const options = { videoBitsPerSecond: 650_000 };
+    if (mimeType) options.mimeType = mimeType;
+    const recorder = new MediaRecorder(stream, options);
+    const chunks = [];
+    const recorded = new Promise((resolve, reject) => {
+      recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+      recorder.onerror = () => reject(new Error("Couldn't compress this video. Try recording in the app."));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || "video/webm" }));
+    });
+
+    video.currentTime = 0;
+    try {
+      await video.play();
+      recorder.start(250);
+      const drawFrame = () => {
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+        if (video.ended || video.paused) {
+          if (recorder.state === "recording") recorder.stop();
+        } else {
+          requestAnimationFrame(drawFrame);
+        }
+      };
+      drawFrame();
+      const blob = await recorded;
+      if (blob.size > MAX_STITCH_UPLOAD_BYTES) {
+        throw new Error("This video is still too large after compression. Trim it to a shorter room turn and try again.");
+      }
+      const extension = blob.type.includes("mp4") ? "mp4" : "webm";
+      return new File([blob], `edge-stop-pan.${extension}`, { type: blob.type });
+    } finally {
+      if (recorder.state === "recording") recorder.stop();
+      stream.getTracks().forEach((track) => track.stop());
+    }
+  } finally {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    URL.revokeObjectURL(sourceUrl);
+  }
+}
+
 function RoomIllustration() {
   return (
     <div className="scene-card">
@@ -59,6 +135,7 @@ function App() {
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [processingStep, setProcessingStep] = useState(0);
+  const [preparingUpload, setPreparingUpload] = useState(false);
   const imageInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const cameraRef = useRef(null);
@@ -87,14 +164,14 @@ function App() {
   }, [recording, screen]);
 
   useEffect(() => {
-    if (screen !== "processing") return undefined;
+    if (screen !== "processing" || preparingUpload) return undefined;
     const timers = [
       window.setTimeout(() => setProcessingStep(1), 1800),
       window.setTimeout(() => setProcessingStep(2), 5200),
       window.setTimeout(() => setProcessingStep(3), 12000),
     ];
     return () => timers.forEach(window.clearTimeout);
-  }, [screen]);
+  }, [preparingUpload, screen]);
 
   function goHome() {
     cancelCaptureRef.current = true;
@@ -138,11 +215,15 @@ function App() {
 
   async function stitchVideo(file, filename = file.name || "camera-pan.webm") {
     setScreen("processing");
-    setProcessingStep(0);
+    setPreparingUpload(file.size > MAX_STITCH_UPLOAD_BYTES);
+    setProcessingStep(file.size > MAX_STITCH_UPLOAD_BYTES ? 0 : 1);
     setError("");
     try {
+      const uploadFile = await compressVideoForUpload(file);
+      setPreparingUpload(false);
+      setProcessingStep(1);
       const formData = new FormData();
-      formData.append("file", file, filename);
+      formData.append("file", uploadFile, uploadFile === file ? filename : uploadFile.name);
       const response = await fetch("/stitch", { method: "POST", body: formData });
       if (!response.ok) {
         let detail = "Couldn't stitch. Pan slower with good light and try again.";
@@ -162,7 +243,10 @@ function App() {
       setStatusMessage("Panorama ready. Drag through the view or detect architectural edges.");
       setScreen("viewer");
     } catch (cause) {
-      setError(cause.message || "Couldn't stitch. Pan slower with good light and try again.");
+      setPreparingUpload(false);
+      setError(cause instanceof TypeError && cause.message === "Failed to fetch"
+        ? "The upload couldn't reach the stitching server. Check your internet connection and try again."
+        : cause.message || "Couldn't stitch. Pan slower with good light and try again.");
       setScreen("videoUpload");
     }
   }
@@ -277,10 +361,11 @@ function App() {
   }
 
   const processCopy = [
+    ["Preparing your video", "Compressing this clip on your phone so it can upload safely."],
     ["Reading your pan", "Finding the clearest frames in your recording."],
     ["Matching the overlap", "Aligning shared details from frame to frame."],
     ["Stitching the scene", "Blending each frame into one continuous view."],
-    ["Finishing the panorama", "A full room turn can take up to two minutes while the wall views are aligned."],
+    ["Finishing the panorama", "A full room turn can take a few minutes while the wall views are aligned."],
   ][processingStep];
 
   return (
@@ -347,7 +432,7 @@ function App() {
           <div className="eyebrow"><span className="eyebrow-dash" /> WORKING ON YOUR PANORAMA</div>
           <h1>{processCopy[0]}</h1><p>{processCopy[1]}</p>
           <div className="processing-progress"><i /></div>
-          <span className="processing-caption">FULL ROOM STITCHING CAN TAKE UP TO TWO MINUTES</span>
+          <span className="processing-caption">FULL ROOM STITCHING CAN TAKE A FEW MINUTES</span>
         </main>
       )}
 
@@ -383,3 +468,4 @@ function App() {
 }
 
 export default App;
+

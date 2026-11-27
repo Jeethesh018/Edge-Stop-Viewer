@@ -22,13 +22,13 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Hold the phone sideways near the room center and record one smooth, complete 360° turn in good light, finishing where you started. Videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds and resizes frames to 1000 pixels wide. It tries OpenCV panorama mode first for in-place rotation, then falls back to scan mode. Feature matching runs at a reduced resolution for faster processing while the final composite uses the 1000-pixel frames. Black borders are trimmed and a successful video stitch opens in continuous wraparound view. If OpenCV cannot align the images, the app shows a retry message.
+Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Hold the phone sideways near the room center and record one smooth, complete 360° turn in good light, finishing where you started. Videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds, resizes frames to 1000 pixels wide, applies phone rotation metadata, and measures horizontal motion between frames to join an ordered room sweep. OpenCV panorama and scan stitching remain available as fallbacks for shorter pans. Black borders are trimmed and a successful video stitch opens in continuous wraparound view. If the frames cannot be aligned, the app shows a retry message.
 
 For frontend development with Vite hot reload, start FastAPI in one terminal, then run `npm run dev` in another and open <http://127.0.0.1:5173>.
 
 ## Deploy to Vercel
 
-The included `vercel.json` builds the Vite frontend into `app/static` and routes `/stitch` to the FastAPI Python function. The browser recorder uses a lower bitrate to keep typical 30-second clips within the default function upload limit. Larger existing video files may need to be shortened or compressed before upload.
+The included `vercel.json` builds the Vite frontend into `app/static` and routes `/stitch` to the FastAPI Python function. Vercel limits request bodies to about 4.5 MB, so the browser compresses larger selected videos to 720p before upload. The camera recorder uses a lower bitrate to keep typical 30-second clips below the same limit.
 
 ## Create a sample video
 
