@@ -22,7 +22,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Hold the phone sideways near the room center and record one smooth, complete 360° turn in good light, finishing where you started. Videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds, resizes frames to 1000 pixels wide, and checks that the recording returns to its starting view. Incomplete sweeps receive a clear retry message. Full turns use OpenCV panorama mode first for in-place rotation, then fall back to scan mode. Feature matching runs at a reduced resolution for faster processing while the final composite uses the 1000-pixel frames. Black borders are trimmed and the JPEG is returned for continuous wraparound viewing.
+Open <http://127.0.0.1:8000>. Camera access requires `localhost` or HTTPS and browser permission. The app prefers the rear camera. Hold the phone sideways near the room center and record one smooth, complete 360° turn in good light, finishing where you started. Videos are limited to 30 seconds. The `/stitch` endpoint samples a frame every 0.3 seconds and resizes frames to 1000 pixels wide. It tries OpenCV panorama mode first for in-place rotation, then falls back to scan mode. Feature matching runs at a reduced resolution for faster processing while the final composite uses the 1000-pixel frames. Black borders are trimmed and a successful video stitch opens in continuous wraparound view. If OpenCV cannot align the images, the app shows a retry message.
 
 For frontend development with Vite hot reload, start FastAPI in one terminal, then run `npm run dev` in another and open <http://127.0.0.1:5173>.
 
@@ -47,3 +47,4 @@ Then open the app, choose the video file, and press **Stitch video**. The result
 - Input panorama images are loaded directly in the browser and are not sent to the backend.
 - Full-turn videos automatically use the strongest vertical-edge peaks spaced around four wall sections as corner stops. **Detect edges** can add more stops manually.
 - The in-memory viewer and its stop pins reset when the page is reloaded.
+
